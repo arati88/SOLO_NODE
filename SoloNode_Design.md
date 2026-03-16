@@ -494,3 +494,266 @@ This process measures **AI collaboration effectiveness**.
 - Engineer ability to analyze system architecture  
 - Quality of AI collaboration  
 - Accuracy of bug diagnosis
+
+
+## 11 How Claude Code Is Used in This Hackathon
+This hackathon is conducted entirely using Claude Code — the CLI-based AI engineering tool. Participants interact with Claude directly from their terminal while working inside the SoloNode codebase. This section explains what a Claude declaration is, how declarations map to each stage of the 4-hour assessment, example declarations for each deliverable, and the rules that govern how Claude may be used throughout the session.
+
+
+## Claude Declaration Structure
+
+Every declaration follows a **four-part structure**:
+
+### 1. Role
+Tell Claude what kind of expert it is acting as.  
+**Example:**  
+> “You are a senior Python engineer.”
+
+---
+
+### 2. Context
+Describe the situation and the specific symptom observed.  
+**Example:**  
+> “I am working on SoloNode, a Python transaction audit service. When I run the system, some transactions are reported as successful but never appear in the audit log.”
+
+---
+
+### 3. Task
+State exactly what you want Claude to do.  
+**Example:**  
+> “Review the `audit.py` module I have pasted below and identify what is causing this behaviour.”
+
+---
+
+### 4. Output Format
+Specify what the response should look like.  
+**Example:**  
+> “Name the defect category, explain the root cause, and provide a corrected version of the function.”
+
+---
+
+## Stage 1 Declarations 
+
+The participant explores SoloNode, identifies all defects, writes CLAUDE.md, and produces DIAGNOSIS.md. Claude declarations in this stage are symptom-driven — the participant does not know what defects exist or how many. Every declaration must start from what the participant actually observes when running the system.
+
+**Declaration 1A**
+
+To rapidly understand the SoloNode architecture before diving into individual modules.
+
+>“You are a senior Python engineer onboarding onto an unfamiliar codebase. I have just been handed SoloNode, a transaction audit microservice. The original developer has left. There are no tests. I will paste the file listing and contents of each module below. Read the entire codebase, explain the data flow from input to output, identify the responsibility of each module, and flag anything that looks structurally suspicious or unusual. Do not fix anything yet — only describe what you see.”
+
+
+**Declaration 1B — Symptom-Driven Module Investigation**
+
+Use when a specific symptom has been observed (e.g. missing audit log entries, incorrect fee values). Scope this declaration to one module at a time.
+
+>“You are a Python debugging expert. I am running SoloNode and I observe the following: [describe the symptom exactly as seen — do not guess the cause]. I have pasted the [module name] below. Read through the code, reason through what could produce this specific symptom, name the category of defect if one exists, and explain the root cause. Do not assume — base your answer only on the code provided.”
+
+
+**Declaration 1C — CLAUDE.md Drafting**
+
+Use after completing the initial exploration to draft CLAUDE.md.It must reflect the participant’s own understanding — not a copy of Claude’s output. Use Claude to structure it but write the content yourself.
+
+>“You are a technical documentation specialist. I need to produce a CLAUDE.md file for the SoloNode codebase. This file will be read by a new developer who has never seen the code. It must include: project purpose and architecture in plain language, all modules and their responsibilities, all run and test commands, the defects I have found so far with their locations and root causes, and specific guidance on what kinds of prompts work well and poorly for this codebase. I will provide the codebase and my current notes. Generate a structured CLAUDE.md template that I can then fill in with my own observations.”
+
+
+**Declaration 1D — DIAGNOSIS.md Entry Drafting**
+
+Use after identifying each defect to produce a well-structured DIAGNOSIS.md entry. DIAGNOSIS.md is assessed live by the assessor at Checkpoint 1 (09:45). Each entry must show the participant understands the production impact of the defect — not just that it exists.
+
+>“You are a senior engineer writing a defect report for a production incident review. I have identified a defect in SoloNode. Here are my notes: [paste your findings]. Help me write a DIAGNOSIS.md entry for this defect that includes: defect ID, module affected, defect category, exact location in code, root cause explanation in plain language, what would happen in a live production environment if this was never fixed, and my proposed fix approach. Do not write the fix code yet — only the diagnosis entry.”
+
+
+## Stage 2 Declarations
+
+The participant fixes all 4 defects and writes tests that fail before the fix and pass after. Claude declarations in this stage are fix-focused and test-focused. The participant is expected to critically evaluate Claude’s suggestions — not accept them as-itis. The target correction ratio is 25–35%, meaning participants should modify or reject roughly one in three to four Claude suggestions, with documented reasoning in LOG_SUBMISSION.md.
+
+**Declaration 2A — Fix Generation (one defect at a time)**
+
+>“You are a Python engineer implementing a targeted bug fix. The defect is: [state the root cause in your own words, referencing your DIAGNOSIS.md entry]. The affected function is [function name] in [module name]. Constraints: the fix must be minimal — change only what is necessary to resolve the root cause. Do not refactor surrounding code. Do not introduce new dependencies unless essential. Provide the corrected function only, with a one-line comment explaining what was changed and why.”
+
+
+**Declaration 2B — Test Writing**
+
+Use after each fix to write a test that proves the defect existed. The test must fail on the buggy version and pass on the fixed version.
+
+>“You are a Python test engineer writing a regression test using pytest. The defect I just fixed is: [describe the defect and the fix in one sentence]. Write a single focused test that: (1) would fail if run against the original buggy code, (2) passes after my fix, and (3) tests the specific behaviour that was broken — not just that the function runs without error. Include a docstring explaining what the test proves.”
+
+
+## Stage 3 Declarations — Agentic Pipeline
+
+**Declaration 3A — Pipeline Design**
+
+>“You are a Python automation engineer. I need to build pipeline.py — a standalone script that: (1) reads a JSON file containing a batch of transaction records, (2) passes each transaction through SoloNode’s validation and processing logic using the fixed modules, (3) separates records into passing and failing outputs, and (4) writes each group to a separate JSON file. The pipeline must run with a single command and require no manual steps. I have pasted the current SoloNode module structure below. Design the pipeline architecture first — do not write code yet. Describe the data flow, the inputs, the outputs, and any error handling strategy.”
+
+
+**Declaration 3B — Pipeline Implementation**
+
+>“You are a Python engineer implementing the pipeline we just designed. Using the architecture described above, write pipeline.py. Requirements: use only Python standard library imports, handle missing or malformed transaction records without crashing, log each transaction’s outcome clearly, and produce two output files: passing_transactions.json and failing_transactions.json. The script must be runnable with: python pipeline.py transactions.json”
+
+
+## Claude Declarations by Observed Symptom
+
+Participants are not told what defects exist or what category of defect they are looking for. The following declarations are examples of how a participant should approach Claude once they observe something unexpected while running the system. The goal of each declaration is for Claude to help the participant discover, categorize, and understand the defect on their own.
+
+
+Each example below shows: the symptom the participant observes, the declaration they write to Claude, and what Claude is expected to help them discover.
+
+---
+
+**Declaration 1 — Module: audit.py**
+
+**Observed Symptom:** The participant runs the system and processes several transactions. The system reports all transactions as successful, but when the participant checks the audit logs, some transaction IDs are missing. No errors are printed anywhere.
+
+**Example Declaration to Claude:**
+
+>“You are a Python debugging expert. I am running a transaction processing system and I notice that some transactions are not appearing in the audit logs, even though the system says they were processed successfully. There are no error messages or exceptions printed anywhere. I have pasted the audit.py module below. Can you review this code, tell me what type of issue this could be, and explain why this kind of problem is difficult to detect? Do not assume what the defect is — reason through the code and identify it.”
+
+
+**What Claude Will Help the Participant Discover:** Claude will analyze the code, identify the problematic pattern, name the defect category, explain why this class of issue is dangerous in production systems, and guide the participant toward a correct fix — without the participant needing to know any of this in advance.
+
+---
+
+**Declaration 2 — Module: validation.py**
+
+**Observed Symptom:** The participant submits a batch of transactions with decimal amounts. The system processes them, but the calculated fees are slightly lower than expected. When the participant compares the original input values against the values received by the fee module, the amounts appear to have changed.
+
+**Example Declaration to Claude:**
+>“You are a Python systems analyst. I have a transaction processing pipeline with multiple stages: validation, security, fee calculation, and audit. I noticed that the transaction amounts entering the fee module are different from the amounts I originally submitted. The validation stage runs before fee calculation. I have pasted validation.py below. Can you read through this code and explain what might be causing the input data to change between pipeline stages? What category of software defect does this fall under?”
+
+**What Claude Will Help the Participant Discover:** Claude will trace how data flows through the validation function, identify whether the original input is being modified, name the defect category, and recommend safe data handling practices — all based purely on the observed symptom the participant described.
+
+---
+
+**Declaration 3 — Module: security.py**
+
+**Observed Symptom:** The participant reviews the authentication module and finds it appears to work correctly — valid tokens are accepted and invalid tokens are rejected. However, something about the implementation feels unusual when they read the code carefully. There are no visible errors or output differences.
+
+**Example Declaration to Claude:**
+
+>“You are a code security reviewer. I am reviewing a Python authentication module that checks API tokens before processing transactions. The system seems to work — it accepts correct tokens and rejects wrong ones — but I want to make sure the implementation is secure. I have pasted security.py below. Please review the token comparison logic and tell me whether this implementation has any security concerns, even if the system appears to be functioning correctly. What category of vulnerability, if any, does this fall under?”
+
+**What Claude Will Help the Participant Discover:** Claude will analyze the comparison logic, explain what vulnerability category applies, describe how an attacker could exploit it even when the system appears functional, and recommend the secure alternative — teaching the participant a security concept they may not have previously encountered.
+
+---
+
+**Declaration 4 — Module: fee.py**
+
+**Observed Symptom:** The participant manually calculates the expected fee for several transactions and compares them against what the system produces. For whole-number amounts the fee looks correct, but for transactions with decimal amounts the calculated fee is consistently lower than expected by a small amount.
+
+**Example Declaration to Claude:**
+
+>“You are a Python code reviewer. I have a fee calculation module that is supposed to apply a 2% processing fee to each transaction. When I manually calculate the expected fee and compare it against the system output, I find the system always produces a slightly lower fee than expected, but only for transactions with decimal amounts. Whole number amounts seem fine. I have pasted fee.py below. Can you review the calculation logic, tell me what type of defect this is, and explain why it happens specifically with decimal values?”
+
+**What Claude Will Help the Participant Discover:** Claude will identify the arithmetic issue in the calculation, explain what category of logic error this is, show why it affects only decimal values, quantify the financial impact at scale, and recommend the correct Python approach for precise financial arithmetic.
+
+The declarations above are examples to illustrate the expected format and approach. Participants are encouraged to write their own declarations based on what they actually observe when running the system. Declarations that accurately describe the symptom without guessing the defect in advance will yield the most useful responses from Claude.
+
+---
+
+## 12 . Claude Code CLI Features Used
+
+>This hackathon is conducted using Claude Code — Anthropic’s command-line AI engineering tool. Participants interact with Claude directly from their terminal alongside the codebase. This section explains each Claude Code CLI feature that participants may use during the challenge, and what they are expected to report in their submission.
+
+
+**CLI Features and How They Are Used in This Hackathon**
+
+**1 Subagents**
+
+**What it is:** Claude Code can launch subagents — separate, scoped Claude instances — to handle a specific task in parallel or in isolation, without polluting the main session context. Each subagent operates with its own focused scope.
+
+**How participants use it in this hackathon:** A participant can launch a subagent scoped only to audit.py to analyze logging behavior, while keeping their main session focused on tracing the overall pipeline. This enforces the single-module declaration discipline and prevents context bleed between modules.
+
+**What to report in submission:** Which modules did you open subagents for? What task did each subagent handle? Did using a subagent produce a more focused or useful response compared to your main session?
+
+---
+
+**2 Plugins (MCP Servers)**
+
+**What it is:** Claude Code supports MCP (Model Context Protocol) plugins — external server integrations that give Claude access to tools beyond the file system, such as databases, APIs, browsers, or custom tooling. Plugins are declared in the Claude Code configuration and become available as tools Claude can invoke during a session.
+
+**How participants use it in this hackathon:** If a participant configures a plugin such as a log viewer or a test runner, Claude can invoke it directly to inspect live audit log output or run the transaction pipeline and capture results — reducing the need for the participant to copy-paste outputs manually into declarations.
+
+**What to report in submission:** Which plugins, if any, did you configure? What did each plugin allow Claude to do that it could not do otherwise? Did plugin use improve the quality or speed of your debugging?
+
+---
+
+**3 Skills (Custom Slash Commands)**
+
+**What it is:** Skills in Claude Code are reusable prompt templates stored as markdown files in the .claude/commands/ directory and invoked as custom slash commands (e.g. /debug-module or /security-review). They allow participants to define a structured declaration once and reuse it consistently across modules without retyping the full prompt each time.
+
+**How participants use it in this hackathon:** A participant might create a skill such as /symptom-analysis that always instructs Claude to act as a debugging expert, describe the symptom observed, read the specified module, identify the defect category, and suggest a fix — applied consistently to each module they investigate.
+
+**What to report in submission:** Did you create any custom slash commands? Paste the skill template you wrote. How many times did you invoke it and for which modules?
+
+---
+
+**4 Resume (--continue / --resume)**
+
+**What it is:** Claude Code sessions can be resumed after interruption using claude --continue (resumes the most recent session) or claude --resume (presents a list of past sessions to choose from). Resuming restores the full conversation history and file context so participants can continue exactly where they left off without re-explaining the problem.
+
+**How participants use it in this hackathon:** If a participant pauses between investigating modules and returns later, they can resume their session and Claude will remember the full debugging context — which modules were already investigated, what symptoms were observed, and what fixes were applied — without needing to repeat any of it.
+
+**What to report in submission:** Did you use --continue or --resume at any point? How many separate sessions did your debugging span? Did resuming a session save you time or improve continuity?
+
+---
+
+### 13. Approximate Token Usage
+
+>Token usage is a measure of how much of Claude’s processing capacity a participant consumed during their hackathon session. Every declaration sent to Claude and every response received costs tokens. Tracking token usage teaches participants to think about AI collaboration economically — not just whether Claude helped, but how efficiently they used it.
+
+
+**13.1 How to Find Your Token Usage**
+
+>At the end of your hackathon session, token usage can be found in two places. First, Claude Code displays a running token count at the end of each response in the terminal. Second, the full session cost is visible in the Anthropic Console usage dashboard atconsole.anthropic.com under Usage. Participants should note their total token count at the end of the session before submitting.
+
+
+**13.2 What to Report**
+
+Participants must include the following in their submission under the heading “Approximate Token Usage”:
+
+**Total tokens used:** The approximate total from the usage dashboard at the end of the session. Example: ~18,400 tokens.
+
+**Most valuable interaction:** Which single declaration produced the most useful response relative to its cost? Quote the declaration and explain what made it high-value.
+
+**Least valuable interaction:** Which declaration consumed tokens without producing useful output? What would you write differently next time?
+
+**Reflection:** In one or two sentences — was your token usage well spent? Did you get proportionate value from Claude relative to the tokens consumed?
+
+
+**13.3 Token Efficiency Guidance**
+
+High token usage is not penalized, but low-efficiency usage is. The following patterns waste tokens and should be avoided:
+
+***1. Vague Declarations***
+Declarations such as:
+
+- “fix my code”
+- “what is wrong?”
+
+without providing sufficient **context** force Claude to ask clarifying questions.  
+This consumes additional **turns and tokens** before any useful output can be produced.
+
+---
+
+***2. Pasting Entire Codebases***
+
+Pasting an entire codebase into a single declaration:
+
+- Floods the **context window** with irrelevant content
+- Reduces the **precision of Claude’s response**
+- Consumes significantly **more tokens**
+
+A **focused, single-module declaration** is usually much more effective.
+
+---
+
+***3. Repeating the Same Declaration***
+
+Repeating the **same declaration multiple times** without changing the approach after receiving an unsatisfactory response:
+
+- Multiplies **token cost**
+- Does **not improve outcomes**
+
+Instead, **refine the declaration** based on Claude’s previous response to guide the AI toward a better result.
+
