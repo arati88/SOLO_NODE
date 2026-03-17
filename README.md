@@ -1,6 +1,6 @@
 # SoloNode Transaction Audit System
 
-A modular Python transaction processing pipeline that validates, authenticates, calculates fees, and audits financial transactions into a MySQL database via stored procedures.
+A modular Python transaction processing pipeline that validates, authenticates, calculates fees, and audits financial transactions into a MySQL database via stored procedures.(Initial code setup for Hackathon)
 
 ---
 
