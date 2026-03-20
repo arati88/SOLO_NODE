@@ -1,25 +1,27 @@
 """
-This function securely validates API tokens using 
-constant-time comparison to prevent timing attacks and 
-ensure safe authentication
+API token authentication utilities for the transaction processing pipeline.
 """
 import hmac
-from config import API_TOKEN
+import logging
+import os
 
-# Function: authenticate
-# Validates API token for secure access
-# Inputs  : token - Token provided in the request
-# Returns : True if authentication is successful
-# Raises  : PermissionError if token is invalid
-# ---------------------------------------------------------
-def authenticate(token):
+logger = logging.getLogger(__name__)
 
-    # Use hmac.compare_digest for secure comparison
-    # (prevents timing attacks by avoiding early exit comparison)
-    if not hmac.compare_digest(token, API_TOKEN):
 
-        # Raise error if token does not match expected value
+def authenticate(token: str) -> None:
+    """
+    Validate the provided API token against the configured secret.
+
+    Uses constant-time comparison to prevent timing attacks.
+    Raises PermissionError on mismatch, missing token, or invalid input type.
+    """
+    if not isinstance(token, str):
         raise PermissionError("Invalid API token")
-    
-    # Return True if authentication is successful
-    return True
+
+    api_token = os.environ.get("API_TOKEN")
+    if not api_token:
+        raise RuntimeError("API_TOKEN environment variable is not set")
+
+    if not hmac.compare_digest(token, api_token):
+        logger.warning("Authentication failure: invalid token presented")
+        raise PermissionError("Invalid API token")

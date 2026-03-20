@@ -14,7 +14,7 @@ Claude_Code/
 ├── fee.py                          # Calculates 2% processing fee
 ├── audit.py                        # Logs each transaction to the database
 ├── db.py                           # MySQL connection and procedure caller
-├── config.py                       # Centralised settings (DB, token, fee rate)
+├── config.py                       # Centralised settings (DB, fee rate)
 ├── data/
 │   ├── transactions.json           # Input — 100 sample transactions
 │   └── solonode.db                 # Legacy SQLite file (replaced by MySQL)
@@ -71,16 +71,32 @@ Update the password if your MySQL root password is different.
 
 ## Running the Pipeline
 
+Set the required environment variables before running:
+
+```bash
+export API_TOKEN="your_api_token_here"
+export PIPELINE_API_TOKEN="your_api_token_here"
+```
+
+On Windows:
+
+```cmd
+set API_TOKEN=your_api_token_here
+set PIPELINE_API_TOKEN=your_api_token_here
+```
+
+Then run:
+
 ```bash
 python main.py
 ```
 
-That is the only command needed. The pipeline will:
+The pipeline will:
 
-1. Read 100 transactions from `data/transactions.json`
-2. Clear the `audit_log` table (fresh run every time)
-3. Process each transaction through the pipeline
-4. Print a summary to the terminal
+1. Read transactions from `data/transactions.json`
+2. Process each transaction through the pipeline
+3. Log results to the `audit_log` table (append-only — records are never deleted)
+4. Output a summary via the logger
 
 ---
 
@@ -88,25 +104,16 @@ That is the only command needed. The pipeline will:
 
 ```
 INFO: Starting pipeline: 100 transactions
-INFO: {'transaction_id': 'TXN1001', 'status': 'SUCCESS', 'fee': 15.35}
-INFO: {'transaction_id': 'TXN1002', 'status': 'SUCCESS', 'fee': 5.89}
+INFO: Transaction TXN1001 completed with status SUCCESS
+INFO: Transaction TXN1002 completed with status SUCCESS
 ...
-ERROR: Auth failed for TXN1025: Invalid API token
+ERROR: Auth failed for TXN1025
 ...
-
-=============================================
-           PIPELINE SUMMARY
-=============================================
-  Total Transactions : 100
-  SUCCESS            : 96
-  FAILED             : 4
-
-  Failed Transactions:
-    - TXN1025: Invalid API token
-    - TXN1050: Invalid API token
-    - TXN1075: Invalid API token
-    - TXN1100: Invalid API token
-=============================================
+INFO: Pipeline complete — Total: 100 | SUCCESS: 96 | FAILED: 4
+WARNING: Failed transaction TXN1025: Authentication failed.
+WARNING: Failed transaction TXN1050: Authentication failed.
+WARNING: Failed transaction TXN1075: Authentication failed.
+WARNING: Failed transaction TXN1100: Authentication failed.
 ```
 
 ---
@@ -116,11 +123,11 @@ ERROR: Auth failed for TXN1025: Invalid API token
 ```
 transactions.json
         |
-     main.py          — reads input, loops transactions, prints summary
+     main.py          — reads input, loops transactions, logs summary
+        |
+  security.py         — verifies API token using constant-time comparison  ← AUTH FIRST
         |
  validation.py        — checks required fields, type, and positive amount
-        |
-  security.py         — verifies API token using constant-time comparison
         |
      fee.py           — calculates 2% fee using Decimal precision
         |
@@ -137,13 +144,13 @@ transactions.json
 
 | File | Responsibility |
 |---|---|
-| `main.py` | Orchestrates the full pipeline, handles errors, prints summary |
+| `main.py` | Orchestrates the full pipeline, handles errors, logs summary |
 | `validation.py` | Validates transaction structure and amount |
 | `security.py` | Authenticates API token using `hmac.compare_digest` |
 | `fee.py` | Calculates fee using `Decimal` for financial precision |
 | `audit.py` | Logs transaction result to MySQL via stored procedure |
-| `db.py` | Opens MySQL connection, clears table, calls stored procedures |
-| `config.py` | Single source of truth for DB credentials, token, and fee rate |
+| `db.py` | Opens MySQL connection, calls stored procedures |
+| `config.py` | Single source of truth for DB credentials and fee rate |
 
 ---
 
@@ -168,16 +175,17 @@ Accepts four parameters — `transaction_id`, `amount`, `fee`, `status` — and 
 
 ## Configuration
 
-All settings live in `config.py`:
+Database settings live in `config.py`. The API token and pipeline token are loaded from environment variables at runtime — never stored in source files.
 
-| Setting | Default | Description |
+| Setting | Source | Description |
 |---|---|---|
-| `DB_CONFIG.host` | `localhost` | MySQL host |
-| `DB_CONFIG.database` | `solonode_db` | Database name |
-| `DB_CONFIG.user` | `root` | MySQL username |
-| `DB_CONFIG.password` | `password` | MySQL password |
-| `API_TOKEN` | `SECURE123TOKEN` | Valid token for authentication |
-| `FEE_PERCENTAGE` | `0.02` | Processing fee rate (2%) |
+| `DB_CONFIG.host` | `config.py` | MySQL host |
+| `DB_CONFIG.database` | `config.py` | Database name |
+| `DB_CONFIG.user` | `config.py` | MySQL username |
+| `DB_CONFIG.password` | `config.py` | MySQL password |
+| `API_TOKEN` | `os.environ["API_TOKEN"]` | Token verified on each request |
+| `PIPELINE_API_TOKEN` | `os.environ["PIPELINE_API_TOKEN"]` | Token passed into pipeline at startup |
+| `FEE_PERCENTAGE` | `config.py` | Processing fee rate (2%) |
 
 ---
 
@@ -244,10 +252,10 @@ Took 0min 0.081s
 | Scenario | Covers |
 |---|---|
 | Valid transaction passes validation | Happy path — all fields present and valid |
-| Missing `transaction_id` is rejected | Raises `ValueError: Missing field transaction_id` |
-| Missing `amount` is rejected | Raises `ValueError: Missing field amount` |
-| Missing `merchant_id` is rejected | Raises `ValueError: Missing field merchant_id` |
-| Amount as string is rejected | Raises `TypeError` for non-numeric amount |
+| Missing `transaction_id` is rejected | Raises `ValueError: Missing field: transaction_id` |
+| Missing `amount` is rejected | Raises `ValueError: Missing field: amount` |
+| Missing `merchant_id` is rejected | Raises `ValueError: Missing field: merchant_id` |
+| Amount as string is rejected | Raises `TypeError` for non-Decimal amount |
 | Negative amount is rejected | Raises `ValueError: Amount must be positive` |
 | Zero amount is rejected | Raises `ValueError: Amount must be positive` |
 
@@ -255,7 +263,7 @@ Took 0min 0.081s
 
 | Scenario | Covers |
 |---|---|
-| Correct token is accepted | Valid token returns `True` |
+| Correct token is accepted | Valid token raises no exception |
 | Wrong token is rejected | Raises `PermissionError: Invalid API token` |
 | Empty token is rejected | Raises `PermissionError: Invalid API token` |
 | Partial token is rejected | Raises `PermissionError: Invalid API token` |
@@ -277,11 +285,18 @@ Took 0min 0.081s
 | Successful transaction is logged | `call_procedure` is called — no exception raised |
 | Failed transaction is logged | FAILED status saved without error |
 | Database error is logged and re-raised | Exception propagates with `DB connection failed` message |
-| Audit failure is never silently swallowed | `logger.error` is called before the exception re-raises |
+| Audit failure is never silently swallowed | `logger.exception` is called before the exception re-raises |
 
 ### How Mocking Works
 
 All tests that touch the database layer use `unittest.mock.patch` to intercept calls so no real MySQL connection is needed.
+
+**Security tests** — mock the `API_TOKEN` environment variable:
+
+```python
+with patch.dict(os.environ, {'API_TOKEN': context.expected_token}):
+    authenticate(token)
+```
 
 **Audit tests** — mock `call_procedure` directly:
 
@@ -297,14 +312,15 @@ with patch('audit.call_procedure') as mock_proc:
     log_transaction(txn_id, amount, fee, status)
 ```
 
-**Pipeline (main) tests** — mock `log_transaction` in main to capture the status passed by the pipeline:
+**Pipeline (main) tests** — mock `log_transaction` in main and set `API_TOKEN` env var:
 
 ```python
-with patch('main.log_transaction') as mock_log:
-    def capture_log(txn_id, amount, fee, status):
-        context.audit_status = status
-    mock_log.side_effect = capture_log
-    result = process_transaction(txn, token)
+with patch.dict(os.environ, {'API_TOKEN': 'SECURE123TOKEN'}):
+    with patch('main.log_transaction') as mock_log:
+        def capture_log(txn_id, amount, fee, status):
+            context.audit_status = status
+        mock_log.side_effect = capture_log
+        result = process_transaction(txn, token)
 ```
 
 This ensures all tests are fast, isolated, and environment-independent.
@@ -314,8 +330,10 @@ This ensures all tests are fast, isolated, and environment-independent.
 ## Security Notes
 
 - Token comparison uses `hmac.compare_digest` to prevent timing attacks
-- Database credentials are centralised in `config.py` — do not commit real passwords to version control
-- Failed transactions (invalid token) are logged to the database with `fee = 0` and `status = FAILED`
+- API tokens are loaded from environment variables at runtime — never stored in source code or `config.py`
+- Authentication is performed **before** validation so unauthenticated callers cannot probe the API structure through validation error messages
+- Failed transactions (invalid token, validation errors) are logged to the database with `fee = 0` and `status = FAILED`
+- Audit logs are append-only — records are never deleted, satisfying compliance requirements
 
 ---
 

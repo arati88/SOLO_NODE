@@ -1,24 +1,34 @@
 """
- This function calculates transaction fees using 
- precise decimal arithmetic to avoid floating-point errors 
- and ensures accurate financial computations.
+Utility functions for calculating financial transaction fees.
 """
+from decimal import Decimal, ROUND_HALF_UP
 
-from decimal import Decimal
 from config import FEE_PERCENTAGE
 
-# Function: calculate_fee
-# Calculates transaction fee based on percentage
-# Inputs  : amount - Transaction amount (float or numeric)
-# Returns : Fee rounded to 2 decimal places (float)
-# ---------------------------------------------------------
+_CENT = Decimal("0.01")
+_FEE_RATE = Decimal(str(FEE_PERCENTAGE))
 
-def calculate_fee(amount):
+if _FEE_RATE < 0:
+    raise ValueError(f"FEE_PERCENTAGE must be non-negative, got {FEE_PERCENTAGE!r}")
 
-    # Convert amount and percentage to Decimal for precise calculations
-    # (avoids floating-point precision issues)
-    fee = Decimal(str(amount)) * Decimal(str(FEE_PERCENTAGE))
 
-    # Round fee to 2 decimal places (standard for currency)
-    # Convert back to float for compatibility with rest of system
-    return float(round(fee, 2))
+def calculate_fee(amount: Decimal) -> Decimal:
+    """
+    Calculate the transaction fee for a given amount.
+
+    Args:
+        amount: Non-negative transaction amount as Decimal or int.
+
+    Returns:
+        Fee rounded to 2 decimal places (ROUND_HALF_UP) as Decimal.
+
+    Raises:
+        TypeError: If amount is not a Decimal or int.
+        ValueError: If amount is negative.
+    """
+    if not isinstance(amount, (Decimal, int)):
+        raise TypeError(f"amount must be Decimal or int, got {type(amount).__name__}")
+    if amount < 0:
+        raise ValueError(f"amount must be non-negative, got {amount}")
+
+    return (amount * _FEE_RATE).quantize(_CENT, rounding=ROUND_HALF_UP)

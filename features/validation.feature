@@ -11,17 +11,17 @@ Feature: Transaction Validation
   Scenario: Missing transaction_id is rejected
     Given a transaction with no transaction_id
     When I validate the transaction
-    Then it should raise a ValueError with "Missing field transaction_id"
+    Then it should raise a ValueError with "Missing field: transaction_id"
 
   Scenario: Missing amount is rejected
     Given a transaction with no amount
     When I validate the transaction
-    Then it should raise a ValueError with "Missing field amount"
+    Then it should raise a ValueError with "Missing field: amount"
 
   Scenario: Missing merchant_id is rejected
     Given a transaction with no merchant_id
     When I validate the transaction
-    Then it should raise a ValueError with "Missing field merchant_id"
+    Then it should raise a ValueError with "Missing field: merchant_id"
 
   Scenario: Amount as string is rejected
     Given a transaction with amount as string "500"
