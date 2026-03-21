@@ -7,10 +7,10 @@ import logging
 import os
 from decimal import Decimal
 
-from validation import validate_transaction
-from security import authenticate
-from fee import calculate_fee
-from audit import log_transaction
+from transaction_validator import validate_transaction
+from authentication import authenticate
+from fee_calculator import calculate_fee
+from audit_logger import log_transaction
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -107,4 +107,4 @@ if __name__ == "__main__":
     api_token = os.environ.get("PIPELINE_API_TOKEN")
     if not api_token:
         raise EnvironmentError("PIPELINE_API_TOKEN environment variable is not set")
-    run_pipeline("data/transactions.json", api_token)
+    run_pipeline("data/sample_transactions.json", api_token)

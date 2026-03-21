@@ -6,7 +6,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from db import call_procedure
+from database import call_procedure
 
 logger = logging.getLogger(__name__)
 

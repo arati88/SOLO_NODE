@@ -5,11 +5,11 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from behave import given, when, then
-from validation import validate_transaction
-from security import authenticate
-from fee import calculate_fee
-from audit import log_transaction
-from main import process_transaction
+from transaction_validator import validate_transaction
+from authentication import authenticate
+from fee_calculator import calculate_fee
+from audit_logger import log_transaction
+from pipeline import process_transaction
 
 
 # ─────────────────────────────────────────
@@ -158,7 +158,7 @@ def step_db_unavailable(context):
 @when('I log transaction "{txn_id}" with amount {amount:f} fee {fee:f} and status "{status}"')
 def step_log_transaction(context, txn_id, amount, fee, status):
     if context.db_available:
-        with patch('audit.call_procedure') as mock_proc:
+        with patch('audit_logger.call_procedure') as mock_proc:
             mock_proc.return_value = None
             try:
                 log_transaction(txn_id, amount, fee, status)
@@ -167,7 +167,7 @@ def step_log_transaction(context, txn_id, amount, fee, status):
             except Exception as e:
                 context.exception = e
     else:
-        with patch('audit.call_procedure') as mock_proc:
+        with patch('audit_logger.call_procedure') as mock_proc:
             mock_proc.side_effect = Exception("DB connection failed")
             try:
                 log_transaction(txn_id, amount, fee, status)
@@ -191,8 +191,8 @@ def step_audit_raises(context):
 
 @then('the error should be logged before raising')
 def step_audit_logs_before_raising(context):
-    with patch('audit.call_procedure') as mock_proc:
-        with patch('audit.logger') as mock_logger:
+    with patch('audit_logger.call_procedure') as mock_proc:
+        with patch('audit_logger.logger') as mock_logger:
             mock_proc.side_effect = Exception("DB connection failed")
             try:
                 log_transaction("TXN9999", 100.0, 2.0, "SUCCESS")
@@ -227,7 +227,7 @@ def step_incomplete_transaction(context):
 @when('I run the transaction through the pipeline')
 def step_run_pipeline(context):
     with patch.dict(os.environ, {'API_TOKEN': 'SECURE123TOKEN'}):
-        with patch('main.log_transaction') as mock_log:
+        with patch('pipeline.log_transaction') as mock_log:
             def capture_log(txn_id, amount, fee, status):
                 context.audit_status = status
             mock_log.side_effect = capture_log

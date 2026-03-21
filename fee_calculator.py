@@ -3,7 +3,7 @@ Utility functions for calculating financial transaction fees.
 """
 from decimal import Decimal, ROUND_HALF_UP
 
-from config import FEE_PERCENTAGE
+from settings import FEE_PERCENTAGE
 
 _CENT = Decimal("0.01")
 _FEE_RATE = Decimal(str(FEE_PERCENTAGE))
