@@ -5,7 +5,7 @@
 """
 
 import mysql.connector   # Python driver to connect to MySQL
-from config import DB_CONFIG    # dictionary containing DB credentials
+from settings import DB_CONFIG    # dictionary containing DB credentials
 
 # Function: get_connection
 # Establishes and returns a new database connection
