@@ -1,255 +1,508 @@
-import sys
+"""
+Step definitions for SoloNode Transaction Audit POC.
+All DB calls are mocked so no MySQL connection is required to run these tests.
+"""
+import inspect
 import os
+import copy
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from unittest.mock import patch
 
-from behave import given, when, then
-from transaction_validator import validate_transaction
-from authentication import authenticate
-from fee_calculator import calculate_fee
-from audit_logger import log_transaction
-from pipeline import process_transaction
+from behave import given, when, then, use_step_matcher
+
+# Regex matcher lets step patterns match empty strings inside quotes
+use_step_matcher("re")
 
 
-# ─────────────────────────────────────────
-# VALIDATION STEPS
-# ─────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
-@given('a transaction with id "{txn_id}" amount {amount:f} and merchant "{merchant}"')
-def step_valid_transaction(context, txn_id, amount, merchant):
-    context.txn = {
+def _make_txn(txn_id, amount_str, merchant_id):
+    return {
         "transaction_id": txn_id,
-        "amount": Decimal(str(amount)),
-        "merchant_id": merchant
+        "amount": Decimal(amount_str),
+        "merchant_id": merchant_id,
     }
-    context.exception = None
 
-@given('a transaction with no transaction_id')
-def step_missing_transaction_id(context):
-    context.txn = {"amount": Decimal("500.0"), "merchant_id": "M101"}
-    context.exception = None
 
-@given('a transaction with no amount')
-def step_missing_amount(context):
-    context.txn = {"transaction_id": "TXN1001", "merchant_id": "M101"}
-    context.exception = None
+# ===========================================================================
+# ENVIRONMENT SETUP STEPS
+# ===========================================================================
 
-@given('a transaction with no merchant_id')
-def step_missing_merchant_id(context):
-    context.txn = {"transaction_id": "TXN1001", "amount": Decimal("500.0")}
-    context.exception = None
+@given(u"the API token environment variable is set")
+def step_set_api_token(context):
+    os.environ["API_TOKEN"] = "SECURE123TOKEN"
 
-@given('a transaction with amount as string "{value}"')
-def step_amount_as_string(context, value):
-    context.txn = {"transaction_id": "TXN1001", "amount": value, "merchant_id": "M101"}
-    context.exception = None
 
-@given('a transaction with amount {amount:g}')
-def step_invalid_amount(context, amount):
-    context.txn = {"transaction_id": "TXN1001", "amount": Decimal(str(amount)), "merchant_id": "M101"}
-    context.exception = None
+@given(u'the API token environment variable is set to "(?P<token>[^"]*)"')
+def step_set_api_token_value(context, token):
+    os.environ["API_TOKEN"] = token
 
-@when('I validate the transaction')
-def step_run_validation(context):
+
+@given(u"the API token environment variable is not set")
+def step_unset_api_token(context):
+    os.environ.pop("API_TOKEN", None)
+
+
+@given(u"the database stored procedure will succeed")
+def step_db_success(context):
+    context.db_patcher = patch("audit_logger.call_procedure", return_value=None)
+    context.mock_db = context.db_patcher.start()
+
+
+@given(u"the database stored procedure will raise an exception")
+def step_db_fail(context):
+    context.db_patcher = patch(
+        "audit_logger.call_procedure",
+        side_effect=Exception("MySQL connection refused: unable to reach solonode_db"),
+    )
+    context.mock_db = context.db_patcher.start()
+
+
+# ===========================================================================
+# AUDIT LOGGING STEPS  (audit_logging.feature)
+# ===========================================================================
+
+@when(u'I call log_transaction with txn_id "(?P<txn_id>[^"]*)" amount "(?P<amount>[^"]*)" fee "(?P<fee>[^"]*)" status "(?P<status>[^"]*)"')
+def step_call_log_transaction(context, txn_id, amount, fee, status):
+    from audit_logger import log_transaction
+    context.raised_exception = None
+    context.returned_normally = False
     try:
-        context.result = validate_transaction(context.txn)
-        context.exception = None
-    except (ValueError, TypeError) as e:
-        context.exception = e
-        context.result = None
-
-@then('validation should pass')
-def step_validation_passes(context):
-    assert context.exception is None, f"Unexpected exception: {context.exception}"
-    assert context.result is True
-
-@then('it should raise a ValueError with "{message}"')
-def step_raises_value_error(context, message):
-    assert isinstance(context.exception, ValueError), \
-        f"Expected ValueError but got {type(context.exception)}"
-    assert message in str(context.exception), \
-        f"Expected '{message}' in '{context.exception}'"
-
-@then('it should raise a TypeError')
-def step_raises_type_error(context):
-    assert isinstance(context.exception, TypeError), \
-        f"Expected TypeError but got {type(context.exception)}"
+        log_transaction(txn_id, Decimal(amount), Decimal(fee), status)
+        context.returned_normally = True
+    except Exception as e:
+        context.raised_exception = e
+    finally:
+        if hasattr(context, "db_patcher"):
+            context.db_patcher.stop()
 
 
-# ─────────────────────────────────────────
-# SECURITY STEPS
-# ─────────────────────────────────────────
-
-@given('the API token is "{token}"')
-def step_set_api_token(context, token):
-    context.expected_token = token
-    context.exception = None
-
-@when('I authenticate with token "{token}"')
-def step_run_authentication(context, token):
-    with patch.dict(os.environ, {'API_TOKEN': context.expected_token}):
-        try:
-            authenticate(token)
-            context.auth_result = True
-            context.exception = None
-        except (PermissionError, RuntimeError) as e:
-            context.exception = e
-            context.auth_result = None
-
-@when(u'I authenticate with token ""')
-def step_run_authentication_empty(context):
-    with patch.dict(os.environ, {'API_TOKEN': context.expected_token}):
-        try:
-            authenticate("")
-            context.auth_result = True
-            context.exception = None
-        except (PermissionError, RuntimeError) as e:
-            context.exception = e
-            context.auth_result = None
-
-@then('authentication should pass')
-def step_auth_passes(context):
-    assert context.exception is None, f"Unexpected exception: {context.exception}"
-
-@then('it should raise a PermissionError with "{message}"')
-def step_raises_permission_error(context, message):
-    assert isinstance(context.exception, PermissionError), \
-        f"Expected PermissionError but got {type(context.exception)}"
-    assert message in str(context.exception), \
-        f"Expected '{message}' in '{context.exception}'"
+@then(u"no exception is raised")
+def step_no_exception(context):
+    assert context.raised_exception is None, (
+        f"Expected no exception but got: {type(context.raised_exception).__name__}: {context.raised_exception}"
+    )
 
 
-# ─────────────────────────────────────────
-# FEE STEPS
-# ─────────────────────────────────────────
-
-@given('a transaction amount of {amount:f}')
-def step_set_amount(context, amount):
-    context.amount = Decimal(str(amount))
-    context.exception = None
-
-@when('I calculate the fee')
-def step_run_fee_calculation(context):
-    context.fee = calculate_fee(context.amount)
-
-@then('the fee should be {expected:f}')
-def step_check_fee(context, expected):
-    assert context.fee == Decimal(str(expected)), \
-        f"Expected fee {expected} but got {context.fee}"
+@then(u"an exception is raised")
+def step_exception_raised(context):
+    assert context.raised_exception is not None, (
+        "Expected an exception to be raised, but log_transaction returned normally.\n"
+        "This is SN-01: the bare 'except: pass' is swallowing the DB error."
+    )
 
 
-# ─────────────────────────────────────────
-# AUDIT STEPS
-# ─────────────────────────────────────────
-
-@given('the database is available')
-def step_db_available(context):
-    context.db_available = True
-    context.exception = None
-    context.log_called = False
-
-@given('the database is unavailable')
-def step_db_unavailable(context):
-    context.db_available = False
-    context.exception = None
-    context.log_called = False
-
-@when('I log transaction "{txn_id}" with amount {amount:f} fee {fee:f} and status "{status}"')
-def step_log_transaction(context, txn_id, amount, fee, status):
-    if context.db_available:
-        with patch('audit_logger.call_procedure') as mock_proc:
-            mock_proc.return_value = None
-            try:
-                log_transaction(txn_id, amount, fee, status)
-                context.log_called = mock_proc.called
-                context.exception = None
-            except Exception as e:
-                context.exception = e
-    else:
-        with patch('audit_logger.call_procedure') as mock_proc:
-            mock_proc.side_effect = Exception("DB connection failed")
-            try:
-                log_transaction(txn_id, amount, fee, status)
-                context.exception = None
-            except Exception as e:
-                context.exception = e
-
-@then('the audit log should be saved without errors')
-def step_audit_saved(context):
-    assert context.exception is None, \
-        f"Unexpected exception raised: {context.exception}"
-    assert context.log_called is True, \
-        "call_procedure was never called — log was not saved"
-
-@then('it should raise a database exception')
-def step_audit_raises(context):
-    assert context.exception is not None, \
-        "Expected an exception but none was raised"
-    assert "DB connection failed" in str(context.exception), \
-        f"Unexpected exception message: {context.exception}"
-
-@then('the error should be logged before raising')
-def step_audit_logs_before_raising(context):
-    with patch('audit_logger.call_procedure') as mock_proc:
-        with patch('audit_logger.logger') as mock_logger:
-            mock_proc.side_effect = Exception("DB connection failed")
-            try:
-                log_transaction("TXN9999", 100.0, 2.0, "SUCCESS")
-            except Exception:
-                pass
-            mock_logger.exception.assert_called_once()
+@then(u"the exception message contains database error information")
+def step_exception_message(context):
+    assert context.raised_exception is not None, "No exception was raised."
+    assert len(str(context.raised_exception)) > 0, "Exception message is empty."
 
 
-# ─────────────────────────────────────────
-# MAIN PIPELINE STEPS
-# ─────────────────────────────────────────
+@then(u"log_transaction does not return normally")
+def step_does_not_return_normally(context):
+    assert not context.returned_normally, (
+        "log_transaction returned normally despite a DB failure.\n"
+        "This is SN-01: the bare 'except: pass' is hiding the error from the caller."
+    )
 
-@given('a valid transaction "{txn_id}" with amount {amount:g} and merchant "{merchant}" and token "{token}"')
-def step_set_pipeline_transaction(context, txn_id, amount, merchant, token):
+
+@then(u"a ValueError is raised")
+def step_value_error_raised(context):
+    assert isinstance(context.raised_exception, ValueError), (
+        f"Expected ValueError but got: {type(context.raised_exception).__name__}: {context.raised_exception}"
+    )
+
+
+@then(u"a TypeError is raised")
+def step_type_error_raised(context):
+    assert isinstance(context.raised_exception, TypeError), (
+        f"Expected TypeError but got: {type(context.raised_exception).__name__}: {context.raised_exception}"
+    )
+
+
+@then(u"a PermissionError is raised")
+def step_permission_error_raised(context):
+    assert isinstance(context.raised_exception, PermissionError), (
+        f"Expected PermissionError but got: {type(context.raised_exception).__name__}: {context.raised_exception}"
+    )
+
+
+@then(u"a RuntimeError is raised")
+def step_runtime_error_raised(context):
+    assert isinstance(context.raised_exception, RuntimeError), (
+        f"Expected RuntimeError but got: {type(context.raised_exception).__name__}: {context.raised_exception}"
+    )
+
+
+# ===========================================================================
+# TRANSACTION VALIDATION STEPS  (transaction_validation.feature)
+# ===========================================================================
+
+@given(u'a transaction with id "(?P<txn_id>[^"]*)" amount "(?P<amount>[^"]*)" merchant "(?P<merchant_id>[^"]*)"')
+def step_make_transaction(context, txn_id, amount, merchant_id):
     context.txn = {
         "transaction_id": txn_id,
-        "amount": Decimal(str(amount)),
-        "merchant_id": merchant
+        "amount": Decimal(amount),
+        "merchant_id": merchant_id,
     }
-    context.token = token
-    context.audit_status = None
+    context.raised_exception = None
 
-@given('an incomplete transaction missing the amount field')
-def step_incomplete_transaction(context):
+
+@given(u'a transaction with float amount (?P<amount>[0-9.]+) and id "(?P<txn_id>[^"]*)" merchant "(?P<merchant_id>[^"]*)"')
+def step_make_float_transaction(context, amount, txn_id, merchant_id):
     context.txn = {
-        "transaction_id": "TXN_BAD",
-        "merchant_id": "M101"
+        "transaction_id": txn_id,
+        "amount": float(amount),
+        "merchant_id": merchant_id,
     }
-    context.token = "SECURE123TOKEN"
-    context.audit_status = None
+    context.raised_exception = None
 
-@when('I run the transaction through the pipeline')
-def step_run_pipeline(context):
-    with patch.dict(os.environ, {'API_TOKEN': 'SECURE123TOKEN'}):
-        with patch('pipeline.log_transaction') as mock_log:
-            def capture_log(txn_id, amount, fee, status):
-                context.audit_status = status
-            mock_log.side_effect = capture_log
-            context.result = process_transaction(context.txn, context.token)
 
-@then('the result status should be "{expected_status}"')
-def step_check_pipeline_status(context, expected_status):
-    assert context.result["status"] == expected_status, \
-        f"Expected status '{expected_status}' but got '{context.result['status']}'"
+@when(u"I validate the transaction")
+def step_validate_transaction(context):
+    from transaction_validator import validate_transaction
+    context.raised_exception = None
+    context.validation_result = None
+    try:
+        context.validation_result = validate_transaction(context.txn)
+    except Exception as e:
+        context.raised_exception = e
 
-@then('the result should contain a fee')
-def step_check_fee_present(context):
-    assert "fee" in context.result, "Fee key missing from result"
-    assert Decimal(context.result["fee"]) > 0, \
-        f"Expected fee > 0 but got {context.result['fee']}"
 
-@then('the result should contain an error message')
-def step_check_error_present(context):
-    assert "error" in context.result, "Error key missing from result"
-    assert len(str(context.result["error"])) > 0, "Error message is empty"
+@then(u"the result is True")
+def step_result_is_true(context):
+    assert context.raised_exception is None, f"Unexpected exception: {context.raised_exception}"
+    assert context.validation_result is True, f"Expected True but got: {context.validation_result}"
 
-@then('the audit log should be called with status "{expected_status}"')
-def step_check_audit_status(context, expected_status):
-    assert context.audit_status == expected_status, \
-        f"Expected audit status '{expected_status}' but got '{context.audit_status}'"
+
+@given(u"a batch of transactions:")
+def step_make_batch(context):
+    context.original_batch = []
+    for row in context.table:
+        txn = {
+            "transaction_id": row["transaction_id"],
+            "amount": Decimal(row["amount"]),
+            "merchant_id": row["merchant_id"],
+        }
+        context.original_batch.append(txn)
+    # Store original amounts keyed by transaction_id for mutation detection
+    context.batch_before_amounts = {
+        t["transaction_id"]: t["amount"] for t in context.original_batch
+    }
+
+
+@when(u"I call validate_batch with the batch")
+def step_call_validate_batch(context):
+    from transaction_validator import validate_batch
+    context.raised_exception = None
+    context.valid_transactions = []
+    try:
+        context.valid_transactions = validate_batch(context.original_batch)
+    except Exception as e:
+        context.raised_exception = e
+
+
+@then(u"the original transaction amounts are unchanged")
+def step_original_amounts_unchanged(context):
+    for txn in context.original_batch:
+        tid = txn["transaction_id"]
+        original = context.batch_before_amounts[tid]
+        current = txn["amount"]
+        assert current == original and isinstance(current, Decimal), (
+            f"Amount for {tid} was mutated!\n"
+            f"  Before: {original} ({type(original).__name__})\n"
+            f"  After:  {current} ({type(current).__name__})\n"
+            "This is SN-02: validate_batch() sets txn['amount'] = int(txn['amount']), "
+            "truncating the value and changing its type from Decimal to int."
+        )
+
+
+@then(u"(?P<txn_id>[A-Z0-9]+) original amount is still \"(?P<expected>[^\"]+)\"")
+def step_original_amount_check(context, txn_id, expected):
+    expected_dec = Decimal(expected)
+    txn = next((t for t in context.original_batch if t["transaction_id"] == txn_id), None)
+    assert txn is not None, f"Transaction {txn_id} not found in original batch"
+    actual = txn["amount"]
+    assert actual == expected_dec and isinstance(actual, Decimal), (
+        f"{txn_id} amount was mutated!\n"
+        f"  Expected: {expected_dec} (Decimal)\n"
+        f"  Got:      {actual} ({type(actual).__name__})\n"
+        "This is SN-02: validate_batch() converts amounts to int, truncating decimal parts "
+        "and permanently modifying the caller's transaction objects."
+    )
+
+
+@then(u"\"(?P<txn_id>[^\"]+)\" in the valid result has amount \"(?P<expected>[^\"]+)\"")
+def step_valid_result_amount(context, txn_id, expected):
+    expected_dec = Decimal(expected)
+    txn = next((t for t in context.valid_transactions if t["transaction_id"] == txn_id), None)
+    assert txn is not None, f"Transaction {txn_id} not found in valid results"
+    actual = txn["amount"]
+    assert actual == expected_dec, (
+        f"{txn_id} in valid result has wrong amount!\n"
+        f"  Expected: {expected_dec}\n"
+        f"  Got:      {actual}\n"
+        "This is SN-02: validate_batch() truncates amounts to int before returning, "
+        "so downstream fee calculation receives the wrong value."
+    )
+
+
+@then(u"the returned valid list contains (?P<count>[0-9]+) transactions")
+def step_valid_list_count(context, count):
+    expected = int(count)
+    actual = len(context.valid_transactions)
+    assert actual == expected, (
+        f"Expected {expected} valid transactions but got {actual}: "
+        f"{[t['transaction_id'] for t in context.valid_transactions]}"
+    )
+
+
+# ===========================================================================
+# AUTHENTICATION STEPS  (authentication.feature)
+# ===========================================================================
+
+@when(u'I authenticate with token "(?P<token>[^"]*)"')
+def step_authenticate(context, token):
+    from authentication import authenticate
+    context.raised_exception = None
+    try:
+        authenticate(token)
+    except Exception as e:
+        context.raised_exception = e
+
+
+@when(u"I authenticate with a non-string token")
+def step_authenticate_non_string(context):
+    from authentication import authenticate
+    context.raised_exception = None
+    try:
+        authenticate(12345)
+    except Exception as e:
+        context.raised_exception = e
+
+
+@then(u"the authenticate function uses hmac.compare_digest for token comparison")
+def step_check_hmac_usage(context):
+    import authentication
+    source = inspect.getsource(authentication.authenticate)
+    assert "hmac.compare_digest" in source, (
+        "authenticate() does not use hmac.compare_digest().\n"
+        "This is SN-03: the current implementation uses plain '!=' which leaks token "
+        "information through timing differences.\n"
+        "Fix: replace 'if token != api_token:' with 'if not hmac.compare_digest(token, api_token):'"
+    )
+
+
+# ===========================================================================
+# FEE CALCULATION STEPS  (fee_calculation.feature)
+# ===========================================================================
+
+@given(u'a transaction amount of "(?P<amount>[^"]*)"')
+def step_set_amount(context, amount):
+    context.amount = Decimal(amount)
+    context.raised_exception = None
+    context.calculated_fee = None
+
+
+@when(u"I calculate the fee")
+def step_calculate_fee(context):
+    from fee_calculator import calculate_fee
+    context.raised_exception = None
+    context.calculated_fee = None
+    try:
+        context.calculated_fee = calculate_fee(context.amount)
+    except Exception as e:
+        context.raised_exception = e
+
+
+@when(u"I calculate the fee for a float amount (?P<amount>[0-9.]+)")
+def step_calculate_fee_float(context, amount):
+    from fee_calculator import calculate_fee
+    context.raised_exception = None
+    context.calculated_fee = None
+    try:
+        context.calculated_fee = calculate_fee(float(amount))
+    except Exception as e:
+        context.raised_exception = e
+
+
+@then(u'the fee should be "(?P<expected_fee>[^"]*)"')
+def step_fee_should_be(context, expected_fee):
+    assert context.raised_exception is None, f"Unexpected exception: {context.raised_exception}"
+    expected = Decimal(expected_fee)
+    actual = context.calculated_fee
+    assert actual == expected, (
+        f"Fee mismatch for amount {context.amount}:\n"
+        f"  Expected: {expected}\n"
+        f"  Got:      {actual}\n"
+        "This is SN-04: int(amount * rate * 100) / 100 truncates instead of rounding.\n"
+        "Fix: use (amount * _FEE_RATE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)"
+    )
+
+
+@given(u"the sample transaction dataset")
+def step_load_dataset(context):
+    import json
+    with open("data/sample_transactions.json") as f:
+        data = json.load(f)
+    context.dataset = data["transactions"]
+
+
+@when(u"I calculate fees for all transactions")
+def step_calculate_all_fees(context):
+    from fee_calculator import calculate_fee
+    context.fee_results = []
+    for txn in context.dataset:
+        amount = Decimal(str(txn["amount"]))
+        expected = Decimal(str(txn["expected_fee"]))
+        actual = calculate_fee(amount)
+        context.fee_results.append({
+            "transaction_id": txn["transaction_id"],
+            "expected": expected,
+            "actual": actual,
+            "match": actual == expected,
+        })
+
+
+@then(u"at least (?P<threshold>[0-9]+) out of (?P<total>[0-9]+) transactions should have the correct fee")
+def step_fee_accuracy_threshold(context, threshold, total):
+    threshold = int(threshold)
+    total = int(total)
+    correct = sum(1 for r in context.fee_results if r["match"])
+    wrong = [r for r in context.fee_results if not r["match"]]
+    assert correct >= threshold, (
+        f"Only {correct}/{total} transactions have the correct fee (threshold: {threshold}).\n"
+        f"Wrong fees on {len(wrong)} transactions:\n" +
+        "\n".join(
+            f"  {r['transaction_id']}: expected={r['expected']} got={r['actual']}"
+            for r in wrong[:10]
+        ) +
+        (f"\n  ... and {len(wrong) - 10} more" if len(wrong) > 10 else "") +
+        "\nThis is SN-04: int() truncation is under-charging fees on fractional cent amounts."
+    )
+
+
+# ===========================================================================
+# PIPELINE STEPS  (pipeline.feature)
+# ===========================================================================
+
+@given(u'the pipeline environment is configured with token "(?P<token>[^"]*)"')
+def step_pipeline_env(context, token):
+    os.environ["API_TOKEN"] = token
+    os.environ["PIPELINE_API_TOKEN"] = token
+
+
+@given(u'a pipeline transaction with id "(?P<txn_id>[^"]*)" amount "(?P<amount>[^"]*)" merchant "(?P<merchant_id>[^"]*)" token "(?P<token>[^"]*)"')
+def step_pipeline_txn(context, txn_id, amount, merchant_id, token):
+    context.pipeline_txn = {
+        "transaction_id": txn_id,
+        "amount": Decimal(amount),
+        "merchant_id": merchant_id,
+    }
+    context.pipeline_token = token
+
+
+@given(u"an incomplete pipeline transaction missing the merchant_id")
+def step_pipeline_txn_missing_merchant(context):
+    context.pipeline_txn = {
+        "transaction_id": "TXN001",
+        "amount": Decimal("500.00"),
+    }
+    context.pipeline_token = os.environ.get("API_TOKEN", "SECURE123TOKEN")
+
+
+@when(u"I process the transaction through the pipeline")
+def step_process_pipeline_txn(context):
+    from pipeline import process_transaction
+    with patch("audit_logger.call_procedure", return_value=None):
+        context.pipeline_result = process_transaction(
+            context.pipeline_txn, context.pipeline_token
+        )
+
+
+@then(u'the result status is "(?P<status>[^"]*)"')
+def step_result_status(context, status):
+    actual = context.pipeline_result.get("status")
+    assert actual == status, f"Expected status '{status}' but got '{actual}'"
+
+
+@then(u"the result contains a fee")
+def step_result_has_fee(context):
+    assert "fee" in context.pipeline_result, "Result does not contain a 'fee' key"
+    assert context.pipeline_result["fee"] is not None, "Fee is None"
+
+
+@then(u'the error message is "(?P<message>[^"]*)"')
+def step_result_error_message(context, message):
+    actual = context.pipeline_result.get("error")
+    assert actual == message, f"Expected error '{message}' but got '{actual}'"
+
+
+@given(u"the sample transaction dataset file")
+def step_load_pipeline_dataset(context):
+    context.dataset_file = "data/sample_transactions.json"
+
+
+@when(u"I run the full pipeline")
+def step_run_full_pipeline(context):
+    import json
+    from pipeline import process_transaction
+
+    with open(context.dataset_file) as f:
+        data = json.load(f)
+
+    token = os.environ.get("API_TOKEN", "SECURE123TOKEN")
+    context.pipeline_run_results = {}
+    success = 0
+    failed = 0
+
+    with patch("audit_logger.call_procedure", return_value=None):
+        for row in data["transactions"]:
+            txn = {
+                "transaction_id": row["transaction_id"],
+                "amount": Decimal(str(row["amount"])),
+                "merchant_id": row["merchant_id"],
+            }
+            txn_token = row.get("token", token)
+            result = process_transaction(txn, txn_token)
+            context.pipeline_run_results[row["transaction_id"]] = result
+            if result["status"] == "SUCCESS":
+                success += 1
+            else:
+                failed += 1
+
+    context.pipeline_success_count = success
+    context.pipeline_failed_count = failed
+    context.pipeline_total_count = len(data["transactions"])
+
+
+@then(u"the total transactions processed is (?P<total>[0-9]+)")
+def step_pipeline_total(context, total):
+    assert context.pipeline_total_count == int(total), (
+        f"Expected {total} total transactions but got {context.pipeline_total_count}"
+    )
+
+
+@then(u"the number of successful transactions is (?P<count>[0-9]+)")
+def step_pipeline_success_count(context, count):
+    assert context.pipeline_success_count == int(count), (
+        f"Expected {count} successes but got {context.pipeline_success_count}"
+    )
+
+
+@then(u"the number of failed transactions is (?P<count>[0-9]+)")
+def step_pipeline_failed_count(context, count):
+    assert context.pipeline_failed_count == int(count), (
+        f"Expected {count} failures but got {context.pipeline_failed_count}"
+    )
+
+
+@then(u'transaction "(?P<txn_id>[^"]+)" has status "(?P<status>[^"]+)"')
+def step_transaction_status(context, txn_id, status):
+    result = context.pipeline_run_results.get(txn_id)
+    assert result is not None, f"Transaction {txn_id} not found in pipeline results"
+    assert result["status"] == status, (
+        f"Expected {txn_id} to have status '{status}' but got '{result['status']}'"
+    )

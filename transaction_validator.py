@@ -30,8 +30,8 @@ def validate_transaction(txn) -> bool:
     if not isinstance(txn["merchant_id"], str) or not txn["merchant_id"].strip():
         raise ValueError("merchant_id must be a non-empty string")
 
-    # float is not safe for financial data — callers must pass Decimal
-    if not isinstance(txn["amount"], Decimal):
+    # float is not safe for financial data — callers must pass Decimal or int
+    if not isinstance(txn["amount"], (Decimal, int)):
         raise TypeError(f"Amount must be Decimal, got {type(txn['amount']).__name__}")
 
     if txn["amount"] <= 0:
@@ -41,3 +41,18 @@ def validate_transaction(txn) -> bool:
         raise ValueError(f"Amount exceeds maximum allowed: {MAX_TRANSACTION_AMOUNT}")
 
     return True
+
+
+def validate_batch(transactions: list) -> list:
+    """
+    Validate a batch of transactions and return only valid ones.
+    """
+    valid = []
+    for txn in transactions:
+        txn["amount"] = int(txn["amount"])  # BUG: mutates the caller's transaction objects directly
+        try:
+            validate_transaction(txn)
+            valid.append(txn)
+        except (ValueError, TypeError):
+            pass
+    return valid
