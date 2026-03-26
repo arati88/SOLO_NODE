@@ -1,39 +1,87 @@
 Feature: Transaction Validation
-  As a payment system
-  I want to validate each transaction before processing
-  So that only correct and complete transactions enter the pipeline
+  As a transaction processing pipeline
+  I need batch validation to be safe and complete
+  So that no valid transaction is lost and caller data is never mutated
+
+  # -------------------------------------------------------
+  # Happy path -- single transaction validation
+  # -------------------------------------------------------
 
   Scenario: Valid transaction passes validation
-    Given a transaction with id "TXN1001" amount 500.0 and merchant "M101"
+    Given a transaction with id "TXN001" amount "767.67" merchant "M101"
     When I validate the transaction
-    Then validation should pass
+    Then the result is True
 
-  Scenario: Missing transaction_id is rejected
-    Given a transaction with no transaction_id
+  Scenario: Transaction with missing transaction_id is rejected
+    Given a transaction with id "" amount "100.00" merchant "M101"
     When I validate the transaction
-    Then it should raise a ValueError with "Missing field: transaction_id"
+    Then a ValueError is raised
 
-  Scenario: Missing amount is rejected
-    Given a transaction with no amount
+  Scenario: Transaction with missing merchant_id is rejected
+    Given a transaction with id "TXN001" amount "100.00" merchant ""
     When I validate the transaction
-    Then it should raise a ValueError with "Missing field: amount"
+    Then a ValueError is raised
 
-  Scenario: Missing merchant_id is rejected
-    Given a transaction with no merchant_id
+  Scenario: Transaction with zero amount is rejected
+    Given a transaction with id "TXN001" amount "0.00" merchant "M101"
     When I validate the transaction
-    Then it should raise a ValueError with "Missing field: merchant_id"
+    Then a ValueError is raised
 
-  Scenario: Amount as string is rejected
-    Given a transaction with amount as string "500"
+  Scenario: Transaction with negative amount is rejected
+    Given a transaction with id "TXN001" amount "-50.00" merchant "M101"
     When I validate the transaction
-    Then it should raise a TypeError
+    Then a ValueError is raised
 
-  Scenario: Negative amount is rejected
-    Given a transaction with amount -100.0
+  Scenario: Transaction with float amount is rejected
+    Given a transaction with float amount 100.0 and id "TXN001" merchant "M101"
     When I validate the transaction
-    Then it should raise a ValueError with "Amount must be positive"
+    Then a TypeError is raised
 
-  Scenario: Zero amount is rejected
-    Given a transaction with amount 0
+  Scenario: Transaction above maximum limit is rejected
+    Given a transaction with id "TXN001" amount "1000001.00" merchant "M101"
     When I validate the transaction
-    Then it should raise a ValueError with "Amount must be positive"
+    Then a ValueError is raised
+
+  # -------------------------------------------------------
+  # SN-02: Batch validation must not mutate caller's transaction objects
+  # These scenarios FAIL on buggy code -- txn["amount"] = int(txn["amount"]) modifies original dicts
+  # -------------------------------------------------------
+
+  Scenario: validate_batch does not mutate original transaction amounts
+    Given a batch of transactions:
+      | transaction_id | amount   | merchant_id | valid |
+      | TXN001         | 100.50   | M1          | yes   |
+      | TXN002         | 250.75   | M2          | yes   |
+      | TXN003         | 75.99    | M3          | yes   |
+    When I call validate_batch with the batch
+    Then the original transaction amounts are unchanged
+    And TXN001 original amount is still "100.50"
+    And TXN002 original amount is still "250.75"
+    And TXN003 original amount is still "75.99"
+
+  Scenario: validate_batch returns valid transactions with their original amounts
+    Given a batch of transactions:
+      | transaction_id | amount   | merchant_id | valid |
+      | TXN001         | 100.50   | M1          | yes   |
+      | TXN002         | -50.00   | M2          | no    |
+      | TXN003         | 200.75   | M3          | yes   |
+    When I call validate_batch with the batch
+    Then "TXN001" in the valid result has amount "100.50"
+    And "TXN003" in the valid result has amount "200.75"
+
+  Scenario: validate_batch with all valid transactions returns all of them
+    Given a batch of transactions:
+      | transaction_id | amount   | merchant_id | valid |
+      | TXN001         | 100.00   | M1          | yes   |
+      | TXN002         | 200.00   | M2          | yes   |
+      | TXN003         | 300.00   | M3          | yes   |
+    When I call validate_batch with the batch
+    Then the returned valid list contains 3 transactions
+
+  Scenario: validate_batch with all invalid transactions returns empty list
+    Given a batch of transactions:
+      | transaction_id | amount   | merchant_id | valid |
+      | TXN001         | -10.00   | M1          | no    |
+      | TXN002         | -20.00   | M2          | no    |
+    When I call validate_batch with the batch
+    Then the returned valid list contains 0 transactions

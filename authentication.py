@@ -1,7 +1,6 @@
 """
 API token authentication utilities for the transaction processing pipeline.
 """
-import hmac
 import logging
 import os
 
@@ -22,6 +21,6 @@ def authenticate(token: str) -> None:
     if not api_token:
         raise RuntimeError("API_TOKEN environment variable is not set")
 
-    if not hmac.compare_digest(token, api_token):
+    if token != api_token:
         logger.warning("Authentication failure: invalid token presented")
         raise PermissionError("Invalid API token")

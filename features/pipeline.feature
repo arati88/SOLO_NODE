@@ -1,38 +1,55 @@
-Feature: Transaction Pipeline Orchestration
-  As a payment system
-  I want to process transactions through the full pipeline
-  So that each transaction is validated, authenticated, fee-calculated, and audited
+Feature: Transaction Processing Pipeline
+  As a transaction processing system
+  I need the end-to-end pipeline to process transactions accurately
+  So that authentication, validation, fees, and auditing all work together correctly
+
+  Background:
+    Given the pipeline environment is configured with token "SECURE123TOKEN"
+    And the database stored procedure will succeed
+
+  # -------------------------------------------------------
+  # Happy path -- single transaction end-to-end
+  # -------------------------------------------------------
 
   Scenario: Valid transaction is processed successfully
-    Given a valid transaction "TXN1001" with amount 500.0 and merchant "M101" and token "SECURE123TOKEN"
-    When I run the transaction through the pipeline
-    Then the result status should be "SUCCESS"
-    And the result should contain a fee
+    Given a pipeline transaction with id "TXN001" amount "500.00" merchant "M101" token "SECURE123TOKEN"
+    When I process the transaction through the pipeline
+    Then the result status is "SUCCESS"
+    And the result contains a fee
 
-  Scenario: Transaction with invalid amount is rejected
-    Given a valid transaction "TXN1002" with amount -50.0 and merchant "M101" and token "SECURE123TOKEN"
-    When I run the transaction through the pipeline
-    Then the result status should be "FAILED"
-    And the result should contain an error message
+  Scenario: Transaction with invalid token is rejected
+    Given a pipeline transaction with id "TXN001" amount "500.00" merchant "M101" token "WRONGTOKEN"
+    When I process the transaction through the pipeline
+    Then the result status is "FAILED"
+    And the error message is "Authentication failed."
 
-  Scenario: Transaction with wrong token is rejected
-    Given a valid transaction "TXN1003" with amount 200.0 and merchant "M101" and token "WRONGTOKEN"
-    When I run the transaction through the pipeline
-    Then the result status should be "FAILED"
-    And the result should contain an error message
+  Scenario: Transaction with missing required field is rejected
+    Given an incomplete pipeline transaction missing the merchant_id
+    When I process the transaction through the pipeline
+    Then the result status is "FAILED"
+    And the error message is "Invalid transaction data."
 
-  Scenario: Failed transaction is still logged to the audit database
-    Given a valid transaction "TXN1004" with amount -10.0 and merchant "M101" and token "SECURE123TOKEN"
-    When I run the transaction through the pipeline
-    Then the audit log should be called with status "FAILED"
+  Scenario: Transaction with negative amount is rejected
+    Given a pipeline transaction with id "TXN001" amount "-100.00" merchant "M101" token "SECURE123TOKEN"
+    When I process the transaction through the pipeline
+    Then the result status is "FAILED"
+    And the error message is "Invalid transaction data."
 
-  Scenario: Successful transaction is logged to the audit database
-    Given a valid transaction "TXN1005" with amount 300.0 and merchant "M101" and token "SECURE123TOKEN"
-    When I run the transaction through the pipeline
-    Then the audit log should be called with status "SUCCESS"
+  # -------------------------------------------------------
+  # Full dataset run
+  # -------------------------------------------------------
 
-  Scenario: Transaction with missing field returns FAILED status
-    Given an incomplete transaction missing the amount field
-    When I run the transaction through the pipeline
-    Then the result status should be "FAILED"
-    And the result should contain an error message
+  Scenario: Pipeline processes the sample dataset with expected success and failure counts
+    Given the sample transaction dataset file
+    When I run the full pipeline
+    Then the total transactions processed is 100
+    And the number of successful transactions is 96
+    And the number of failed transactions is 4
+
+  Scenario: The 4 security test transactions all fail with authentication error
+    Given the sample transaction dataset file
+    When I run the full pipeline
+    Then transaction "TXN1025" has status "FAILED"
+    And transaction "TXN1050" has status "FAILED"
+    And transaction "TXN1075" has status "FAILED"
+    And transaction "TXN1100" has status "FAILED"

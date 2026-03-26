@@ -46,11 +46,5 @@ def log_transaction(
     params = (txn_id, amount, fee, status)
     try:
         call_procedure("sp_insert_audit_log", params)
-    except Exception:
-        logger.exception(
-            "Audit logging failed for txn_id=%s amount=%s fee=%s status=%s",
-            txn_id, amount, fee, status,
-        )
-        # NOTE: Callers MUST NOT suppress this exception.
-        # A failed audit record is a compliance event.
-        raise
+    except:
+        pass

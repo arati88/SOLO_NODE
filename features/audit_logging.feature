@@ -1,24 +1,44 @@
-Feature: Transaction Audit Logging
-  As a payment system
-  I want to log every transaction result to the database
-  So that there is a permanent audit trail for all transactions
+Feature: Audit Logging
+  As a compliance system
+  I need all audit log failures to raise exceptions
+  So that failed writes are never silently ignored
 
-  Scenario: Successful transaction is logged to database
-    Given the database is available
-    When I log transaction "TXN1001" with amount 767.67 fee 15.35 and status "SUCCESS"
-    Then the audit log should be saved without errors
+  Background:
+    Given the API token environment variable is set
 
-  Scenario: Failed transaction is logged to database
-    Given the database is available
-    When I log transaction "TXN1025" with amount 500.0 fee 0.0 and status "FAILED"
-    Then the audit log should be saved without errors
+  # -------------------------------------------------------
+  # Happy path -- DB available
+  # -------------------------------------------------------
 
-  Scenario: Database error is logged and re-raised
-    Given the database is unavailable
-    When I log transaction "TXN1001" with amount 767.67 fee 15.35 and status "SUCCESS"
-    Then it should raise a database exception
+  Scenario: Successful audit log write completes without error
+    Given the database stored procedure will succeed
+    When I call log_transaction with txn_id "TXN001" amount "500.00" fee "10.00" status "SUCCESS"
+    Then no exception is raised
 
-  Scenario: Audit failure is never silently swallowed
-    Given the database is unavailable
-    When I log transaction "TXN1001" with amount 767.67 fee 15.35 and status "SUCCESS"
-    Then the error should be logged before raising
+  Scenario: log_transaction rejects a negative amount
+    When I call log_transaction with txn_id "TXN001" amount "-100.00" fee "2.00" status "SUCCESS"
+    Then a ValueError is raised
+
+  Scenario: log_transaction rejects an unknown status
+    When I call log_transaction with txn_id "TXN001" amount "100.00" fee "2.00" status "UNKNOWN"
+    Then a ValueError is raised
+
+  Scenario: log_transaction rejects an empty txn_id
+    When I call log_transaction with txn_id "" amount "100.00" fee "2.00" status "SUCCESS"
+    Then a ValueError is raised
+
+  # -------------------------------------------------------
+  # SN-01: DB failure must NOT be silently swallowed
+  # This scenario FAILS on buggy code -- except: pass hides the error
+  # -------------------------------------------------------
+
+  Scenario: DB failure during audit write raises an exception to the caller
+    Given the database stored procedure will raise an exception
+    When I call log_transaction with txn_id "TXN001" amount "500.00" fee "10.00" status "SUCCESS"
+    Then an exception is raised
+    And the exception message contains database error information
+
+  Scenario: DB failure is not silently ignored
+    Given the database stored procedure will raise an exception
+    When I call log_transaction with txn_id "TXN002" amount "200.00" fee "4.00" status "FAILED"
+    Then log_transaction does not return normally

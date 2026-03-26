@@ -1,11 +1,10 @@
 """
 Utility functions for calculating financial transaction fees.
 """
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 from settings import FEE_PERCENTAGE
 
-_CENT = Decimal("0.01")
 _FEE_RATE = Decimal(str(FEE_PERCENTAGE))
 
 if _FEE_RATE < 0:
@@ -31,4 +30,4 @@ def calculate_fee(amount: Decimal) -> Decimal:
     if amount < 0:
         raise ValueError(f"amount must be non-negative, got {amount}")
 
-    return (amount * _FEE_RATE).quantize(_CENT, rounding=ROUND_HALF_UP)
+    return Decimal(int(amount * _FEE_RATE))
